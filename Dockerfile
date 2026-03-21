@@ -15,10 +15,6 @@ COPY . .
 
 RUN mkdir -p docs
 
-COPY start.sh .
-RUN chmod +x start.sh
-RUN sed -i 's/\r//' start.sh
-
 EXPOSE 8000
 
-CMD ["./start.sh"]
+CMD ["python", "-c", "import os, subprocess; subprocess.run(['uvicorn', 'main:app', '--host', '0.0.0.0', '--port', str(os.environ.get('PORT', 8000))])"]
