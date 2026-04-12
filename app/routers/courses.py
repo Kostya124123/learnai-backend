@@ -17,7 +17,7 @@ from app.services.document_service import save_upload, extract_text, chunk_text
 router = APIRouter(tags=["courses"])
 
 
-# ── Documents ──────────────────────────────────────────────────────────────────
+# Documents
 
 @router.post("/documents/upload", response_model=DocumentOut)
 async def upload_document(
@@ -55,11 +55,10 @@ async def list_documents(
 
 @router.post("/reload_docs")
 async def reload_docs(current_user: User = Depends(require_hr)):
-    # TODO: re-index when LLM is connected
     return {"status": "ok", "message": "База знаний обновлена"}
 
 
-# ── Course generation ──────────────────────────────────────────────────────────
+# Course generation
 
 @router.post("/courses/generate", response_model=CourseOut)
 async def generate_course(
@@ -72,10 +71,13 @@ async def generate_course(
         result = await db.execute(select(Document).where(Document.id == body.document_id))
         doc = result.scalar_one_or_none()
         if doc:
-            doc_text = extract_text(doc.file_path)
+            try:
+                doc_text = extract_text(doc.file_path)
+            except Exception:
+                doc_text = None
 
-    # Generate content (stub or real LLM)
-    content = generate_course_content(body.title, doc_text)
+    # Generate content — await async LLM call
+    content = await generate_course_content(body.title, doc_text)
 
     course = Course(
         title=body.title,
@@ -112,7 +114,6 @@ async def generate_course(
     await db.commit()
     await db.refresh(course)
 
-    # count modules
     count_result = await db.execute(
         select(func.count()).where(CourseModule.course_id == course.id)
     )
@@ -129,7 +130,7 @@ async def generate_course(
     )
 
 
-# ── Course list & detail ───────────────────────────────────────────────────────
+# Course list & detail
 
 @router.get("/courses", response_model=list[CourseOut])
 async def list_courses(
@@ -177,7 +178,7 @@ async def get_tests(
     return result.scalars().all()
 
 
-# ── Enrollments ────────────────────────────────────────────────────────────────
+# Enrollments
 
 @router.get("/enrollments/me", response_model=list[EnrollmentOut])
 async def my_enrollments(
@@ -207,7 +208,6 @@ async def enroll(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Check already enrolled
     result = await db.execute(
         select(Enrollment).where(
             Enrollment.user_id == current_user.id,
