@@ -21,8 +21,9 @@ async def _chat(messages: list, temperature: float = 0.3, max_tokens: int = 2048
         "stream": False,
     }
     headers = {
-        "Content-Type": "application/json",
-        "ngrok-skip-browser-warning": "true",
+    "Content-Type": "application/json",
+    "ngrok-skip-browser-warning": "true",
+    "bypass-tunnel-reminder": "true",
     }
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
