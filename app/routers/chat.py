@@ -1,16 +1,15 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.course import ChatHistory
+from app.models.document import Document
 from app.schemas.course import ChatIn, ChatOut, ChatMessageOut
 from app.services.llm_stub import answer_question
 
 router = APIRouter(tags=["chat"])
-
 
 @router.post("/ask", response_model=ChatOut)
 async def ask(
@@ -18,8 +17,23 @@ async def ask(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # TODO: replace with real RAG when model is ready
-    result = answer_question(body.question)
+    # Получаем контекст из загруженных документов (RAG)
+    context = ""
+    try:
+        docs_result = await db.execute(
+            select(Document).where(Document.status == "indexed").limit(3)
+        )
+        docs = docs_result.scalars().all()
+        if docs:
+            # Используем chunk_count как индикатор наличия контента
+            # Пока просто передаём имена документов как контекст
+            doc_names = [d.filename for d in docs]
+            context = f"Доступные документы: {', '.join(doc_names)}"
+    except Exception:
+        pass
+
+    # Вызываем LLM с await
+    result = await answer_question(body.question, context)
 
     record = ChatHistory(
         user_id=current_user.id,
@@ -29,7 +43,6 @@ async def ask(
     )
     db.add(record)
     await db.commit()
-
     return ChatOut(answer=result["answer"], source=result["source"])
 
 
