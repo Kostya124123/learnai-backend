@@ -21,12 +21,12 @@ async def _chat(messages: list, temperature: float = 0.3, max_tokens: int = 2048
         "stream": False,
     }
     headers = {
-    "Content-Type": "application/json",
-    "ngrok-skip-browser-warning": "true",
-    "bypass-tunnel-reminder": "true",
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
     }
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        # Отключаем прокси для локальных запросов к LM Studio
+        async with httpx.AsyncClient(timeout=120.0, proxies={}) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
