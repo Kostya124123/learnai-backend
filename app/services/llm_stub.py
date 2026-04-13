@@ -153,9 +153,11 @@ async def answer_question(question: str, context: str = "") -> dict:
     Отвечает на вопрос пользователя используя RAG-контекст из документов.
     """
     system_prompt = (
-        "Ты — корпоративный AI-ассистент. Отвечай ТОЛЬКО на основе предоставленного контекста из документов. "
-        "Если ответа в документах нет — честно скажи об этом. "
-        "Отвечай на русском языке. Будь конкретным и кратким."
+        "You are a corporate AI assistant. "
+        "CRITICAL: You MUST respond ONLY in Russian language. Never respond in Chinese, English or any other language. "
+        "Answer ONLY based on the provided document context. "
+        "If the answer is not in the documents, say so in Russian. "
+        "Be concise and specific. Always use Russian."
     )
 
     if context:

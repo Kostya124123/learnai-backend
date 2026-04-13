@@ -74,3 +74,16 @@ async def chat_history(
             created_at=row.created_at,
         ))
     return messages
+
+
+@router.delete("/chat/history")
+async def clear_chat_history(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from sqlalchemy import delete as sql_delete
+    await db.execute(
+        sql_delete(ChatHistory).where(ChatHistory.user_id == current_user.id)
+    )
+    await db.commit()
+    return {"status": "cleared"}
