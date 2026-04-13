@@ -245,3 +245,51 @@ async def update_progress(
         enrollment.status = "completed"
     await db.commit()
     return {"status": "updated"}
+
+
+@router.delete("/documents/{doc_id}")
+async def delete_document(
+    doc_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_hr),
+):
+    result = await db.execute(select(Document).where(Document.id == doc_id))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    await db.delete(doc)
+    await db.commit()
+    return {"status": "deleted"}
+
+
+@router.get("/users")
+async def list_users(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_hr),
+):
+    result = await db.execute(
+        select(User).where(User.role.in_(["employee", "user"])).order_by(User.full_name)
+    )
+    users = result.scalars().all()
+    return [{"id": u.id, "full_name": u.full_name, "email": u.email, "role": u.role} for u in users]
+
+
+@router.post("/enrollments/{course_id}/{user_id}")
+async def enroll_user(
+    course_id: int,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_hr),
+):
+    result = await db.execute(
+        select(Enrollment).where(
+            Enrollment.user_id == user_id,
+            Enrollment.course_id == course_id
+        )
+    )
+    if result.scalar_one_or_none():
+        return {"status": "already enrolled"}
+    enrollment = Enrollment(user_id=user_id, course_id=course_id)
+    db.add(enrollment)
+    await db.commit()
+    return {"status": "enrolled"}
