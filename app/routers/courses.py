@@ -253,27 +253,45 @@ async def delete_document(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_hr),
 ):
+    from sqlalchemy import text
     result = await db.execute(select(Document).where(Document.id == doc_id))
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(404, "Document not found")
-    # Удаляем связанные курсы (и их модули/вопросы/enrollments каскадно)
-    courses_result = await db.execute(select(Course).where(Course.document_id == doc_id))
-    for course in courses_result.scalars().all():
-        # Удаляем enrollments
-        enr_result = await db.execute(select(Enrollment).where(Enrollment.course_id == course.id))
-        for enr in enr_result.scalars().all():
-            await db.delete(enr)
-        # Удаляем модули и вопросы
-        mod_result = await db.execute(select(CourseModule).where(CourseModule.course_id == course.id))
-        for mod in mod_result.scalars().all():
-            q_result = await db.execute(select(TestQuestion).where(TestQuestion.module_id == mod.id))
-            for q in q_result.scalars().all():
-                await db.delete(q)
-            await db.delete(mod)
-        await db.delete(course)
-    await db.flush()
-    await db.delete(doc)
+    # Каскадное удаление через сырой SQL в правильном порядке
+    await db.execute(text("""
+        DELETE FROM tests
+        WHERE module_id IN (
+            SELECT cm.id FROM course_modules cm
+            JOIN courses c ON cm.course_id = c.id
+            WHERE c.document_id = :doc_id
+        )
+    """), {"doc_id": doc_id})
+    await db.execute(text("""
+        DELETE FROM enrollments
+        WHERE course_id IN (SELECT id FROM courses WHERE document_id = :doc_id)
+    """), {"doc_id": doc_id})
+    await db.execute(text("""
+        DELETE FROM course_modules
+        WHERE course_id IN (SELECT id FROM courses WHERE document_id = :doc_id)
+    """), {"doc_id": doc_id})
+    await db.execute(text("DELETE FROM courses WHERE document_id = :doc_id"), {"doc_id": doc_id})
+    await db.execute(text("DELETE FROM documents WHERE id = :doc_id"), {"doc_id": doc_id})
+    await db.commit()
+    return {"status": "deleted"}
+
+
+@router.delete("/courses/{course_id}")
+async def delete_course(
+    course_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_hr),
+):
+    from sqlalchemy import text
+    await db.execute(text("DELETE FROM tests WHERE module_id IN (SELECT id FROM course_modules WHERE course_id = :cid)"), {"cid": course_id})
+    await db.execute(text("DELETE FROM enrollments WHERE course_id = :cid"), {"cid": course_id})
+    await db.execute(text("DELETE FROM course_modules WHERE course_id = :cid"), {"cid": course_id})
+    await db.execute(text("DELETE FROM courses WHERE id = :cid"), {"cid": course_id})
     await db.commit()
     return {"status": "deleted"}
 
