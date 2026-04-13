@@ -25,10 +25,18 @@ async def ask(
         )
         docs = docs_result.scalars().all()
         if docs:
-            # Используем chunk_count как индикатор наличия контента
-            # Пока просто передаём имена документов как контекст
-            doc_names = [d.filename for d in docs]
-            context = f"Доступные документы: {', '.join(doc_names)}"
+            import os
+            chunks = []
+            for d in docs:
+                try:
+                    if os.path.exists(d.file_path):
+                        with open(d.file_path, "r", encoding="utf-8") as f:
+                            text = f.read()[:3000]  # Лимит на документ
+                        chunks.append(f"--- Документ: {d.filename} ---\n{text}")
+                except Exception:
+                    pass
+            if chunks:
+                context = "\n\n".join(chunks)
     except Exception:
         pass
 
