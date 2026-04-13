@@ -1,3 +1,4 @@
+import re
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -11,13 +12,20 @@ from app.services.llm_stub import answer_question
 
 router = APIRouter(tags=["chat"])
 
+
+def clean_text(text: str) -> str:
+    text = re.sub(r'[\u4e00-\u9fff\u3400-\u4dbf]+', '', text)
+    text = re.sub(r'[^\u0000-\u007F\u0400-\u04FF\n\r\t ]', ' ', text)
+    text = re.sub(r' {3,}', ' ', text)
+    return text.strip()
+
+
 @router.post("/ask", response_model=ChatOut)
 async def ask(
     body: ChatIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Получаем контекст из загруженных документов (RAG)
     context = ""
     try:
         docs_result = await db.execute(
@@ -25,14 +33,23 @@ async def ask(
         )
         docs = docs_result.scalars().all()
         if docs:
-            # Используем chunk_count как индикатор наличия контента
-            # Пока просто передаём имена документов как контекст
-            doc_names = [d.filename for d in docs]
-            context = f"Доступные документы: {', '.join(doc_names)}"
+            import os
+            from app.services.document_service import extract_text
+            chunks = []
+            for d in docs:
+                try:
+                    if os.path.exists(d.file_path):
+                        text = extract_text(d.file_path)[:2000]
+                        text = clean_text(text)
+                        if len(text) > 50:
+                            chunks.append(f"--- Документ: {d.filename} ---\n{text}")
+                except Exception:
+                    pass
+            if chunks:
+                context = "\n\n".join(chunks)
     except Exception:
         pass
 
-    # Вызываем LLM с await
     result = await answer_question(body.question, context)
 
     record = ChatHistory(
