@@ -34,29 +34,26 @@ async def dashboard(
     )
     incomplete_count = incomplete_result.scalar() or 0
 
-    # Реальные слабые темы из БД
+    # Средний балл по курсам
     weak_topics = []
     try:
-        topics_result = await db.execute(
-            select(
-                TestQuestion.question,
-                func.avg(TestAttempt.score).label("avg_score"),
-                func.count(TestAttempt.id).label("attempts")
-            )
-            .join(TestAttempt, TestAttempt.test_id == TestQuestion.id)
-            .group_by(TestQuestion.id)
-            .having(func.avg(TestAttempt.score) < 80)
-            .order_by(func.avg(TestAttempt.score))
-            .limit(5)
+        courses_res = await db.execute(
+            select(Course.title, Course.id).where(Course.status == "published")
         )
-        rows = topics_result.all()
-        for row in rows:
-            # Обрезаем длинный вопрос до 50 символов
-            topic = row.question[:50] + "..." if len(row.question) > 50 else row.question
+        all_courses = courses_res.all()
+        for course_title, course_id in all_courses:
+            score_res = await db.execute(
+                select(func.avg(TestAttempt.score))
+                .join(TestQuestion, TestAttempt.test_id == TestQuestion.id)
+                .join(CourseModule, TestQuestion.module_id == CourseModule.id)
+                .where(CourseModule.course_id == course_id, TestAttempt.score >= 0)
+            )
+            avg = score_res.scalar()
             weak_topics.append({
-                "topic": topic,
-                "score": round(float(row.avg_score), 1)
+                "topic": course_title,
+                "score": round(float(avg), 1) if avg is not None else 0.0
             })
+        weak_topics.sort(key=lambda x: x["score"])
     except Exception:
         pass
 
