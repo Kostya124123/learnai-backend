@@ -317,7 +317,7 @@ async def list_users(
     current_user: User = Depends(require_hr),
 ):
     result = await db.execute(
-        select(User).where(User.role.in_(["employee", "user"])).order_by(User.full_name)
+        select(User).order_by(User.full_name)
     )
     users = result.scalars().all()
     return [{"id": u.id, "full_name": u.full_name, "email": u.email, "role": u.role} for u in users]

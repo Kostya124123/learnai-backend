@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.core.database import get_db
@@ -34,11 +34,33 @@ async def dashboard(
     )
     incomplete_count = incomplete_result.scalar() or 0
 
-    weak_topics = [
-        {"topic": "Действия при нарушении протокола", "score": 58},
-        {"topic": "Классификация зон риска", "score": 65},
-        {"topic": "Использование СИЗ", "score": 82},
-    ]
+    # Реальные слабые темы из БД
+    weak_topics = []
+    try:
+        topics_result = await db.execute(
+            select(
+                TestQuestion.question,
+                func.avg(TestAttempt.score).label("avg_score"),
+                func.count(TestAttempt.id).label("attempts")
+            )
+            .join(TestAttempt, TestAttempt.test_id == TestQuestion.id)
+            .group_by(TestQuestion.id)
+            .having(func.avg(TestAttempt.score) < 80)
+            .order_by(func.avg(TestAttempt.score))
+            .limit(5)
+        )
+        rows = topics_result.all()
+        for row in rows:
+            # Обрезаем длинный вопрос до 50 символов
+            topic = row.question[:50] + "..." if len(row.question) > 50 else row.question
+            weak_topics.append({
+                "topic": topic,
+                "score": round(float(row.avg_score), 1)
+            })
+    except Exception:
+        pass
+
+    # Если данных нет — пустой список
     recent_activity = [
         {"date": "2025-01-10", "completions": 3},
         {"date": "2025-01-11", "completions": 5},
@@ -46,6 +68,7 @@ async def dashboard(
         {"date": "2025-01-13", "completions": 7},
         {"date": "2025-01-14", "completions": 4},
     ]
+
     return AnalyticsOut(
         total_enrolled=total_enrolled,
         avg_score=avg_score,
@@ -62,14 +85,11 @@ async def employee_card(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_hr),
 ):
-    # Пользователь
     user_res = await db.execute(select(User).where(User.id == user_id))
     user = user_res.scalar_one_or_none()
     if not user:
-        from fastapi import HTTPException
         raise HTTPException(404, "User not found")
 
-    # Записи на курсы
     enr_res = await db.execute(
         select(Enrollment, Course.title)
         .join(Course, Enrollment.course_id == Course.id)
@@ -79,7 +99,6 @@ async def employee_card(
 
     courses_data = []
     for enr, course_title in enrollments:
-        # Тестовые попытки по этому курсу
         attempts_res = await db.execute(
             select(TestAttempt, TestQuestion.question, TestQuestion.correct_answer)
             .join(TestQuestion, TestAttempt.test_id == TestQuestion.id)
@@ -106,7 +125,6 @@ async def employee_card(
 
         test_score = round((correct / len(attempts)) * 100) if attempts else None
 
-        # Ответы на кейсы по этому курсу
         cases_res = await db.execute(
             select(CaseAnswer, CourseModule.title)
             .join(CourseModule, CaseAnswer.module_id == CourseModule.id)
@@ -125,7 +143,6 @@ async def employee_card(
                 "created_at": case_ans.created_at.isoformat() if case_ans.created_at else None,
             })
 
-        # Итоговый балл
         scores = [test_score] if test_score is not None else []
         for c in case_results:
             if c["score"] is not None:
@@ -144,7 +161,6 @@ async def employee_card(
             "final_score": final_score,
         })
 
-    # Общий средний балл
     all_scores = [c["final_score"] for c in courses_data if c["final_score"] is not None]
     overall_score = round(sum(all_scores) / len(all_scores)) if all_scores else None
 
