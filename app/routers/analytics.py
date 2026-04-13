@@ -1,11 +1,10 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-
 from app.core.database import get_db
 from app.core.security import require_hr
 from app.models.user import User
-from app.models.course import Enrollment, TestAttempt, Course
+from app.models.course import Enrollment, TestAttempt, Course, CourseModule, TestQuestion, CaseAnswer
 from app.schemas.course import AnalyticsOut
 
 router = APIRouter(tags=["analytics"])
@@ -16,39 +15,30 @@ async def dashboard(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_hr),
 ):
-    # Total enrolled (unique users)
-    enrolled_result = await db.execute(
-        select(func.count(Enrollment.id))
-    )
+    enrolled_result = await db.execute(select(func.count(Enrollment.id)))
     total_enrolled = enrolled_result.scalar() or 0
 
-    # Average score
     score_result = await db.execute(
         select(func.avg(TestAttempt.score)).where(TestAttempt.score > 0)
     )
     avg_raw = score_result.scalar() or 0
     avg_score = round(float(avg_raw), 1)
 
-    # Courses generated
     courses_result = await db.execute(
         select(func.count(Course.id)).where(Course.status == "published")
     )
     courses_generated = courses_result.scalar() or 0
 
-    # Incomplete enrollments
     incomplete_result = await db.execute(
         select(func.count(Enrollment.id)).where(Enrollment.status == "active")
     )
     incomplete_count = incomplete_result.scalar() or 0
 
-    # Weak topics (stub data for now)
     weak_topics = [
         {"topic": "Действия при нарушении протокола", "score": 58},
         {"topic": "Классификация зон риска", "score": 65},
         {"topic": "Использование СИЗ", "score": 82},
     ]
-
-    # Recent activity (stub)
     recent_activity = [
         {"date": "2025-01-10", "completions": 3},
         {"date": "2025-01-11", "completions": 5},
@@ -56,7 +46,6 @@ async def dashboard(
         {"date": "2025-01-13", "completions": 7},
         {"date": "2025-01-14", "completions": 4},
     ]
-
     return AnalyticsOut(
         total_enrolled=total_enrolled,
         avg_score=avg_score,
@@ -65,3 +54,107 @@ async def dashboard(
         weak_topics=weak_topics,
         recent_activity=recent_activity,
     )
+
+
+@router.get("/analytics/employee/{user_id}")
+async def employee_card(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_hr),
+):
+    # Пользователь
+    user_res = await db.execute(select(User).where(User.id == user_id))
+    user = user_res.scalar_one_or_none()
+    if not user:
+        from fastapi import HTTPException
+        raise HTTPException(404, "User not found")
+
+    # Записи на курсы
+    enr_res = await db.execute(
+        select(Enrollment, Course.title)
+        .join(Course, Enrollment.course_id == Course.id)
+        .where(Enrollment.user_id == user_id)
+    )
+    enrollments = enr_res.all()
+
+    courses_data = []
+    for enr, course_title in enrollments:
+        # Тестовые попытки по этому курсу
+        attempts_res = await db.execute(
+            select(TestAttempt, TestQuestion.question, TestQuestion.correct_answer)
+            .join(TestQuestion, TestAttempt.test_id == TestQuestion.id)
+            .join(CourseModule, TestQuestion.module_id == CourseModule.id)
+            .where(
+                TestAttempt.user_id == user_id,
+                CourseModule.course_id == enr.course_id,
+            )
+        )
+        attempts = attempts_res.all()
+
+        test_results = []
+        correct = 0
+        for attempt, question, correct_answer in attempts:
+            test_results.append({
+                "question": question,
+                "user_answer": attempt.answer,
+                "correct_answer": correct_answer,
+                "is_correct": attempt.is_correct,
+                "score": attempt.score,
+            })
+            if attempt.is_correct:
+                correct += 1
+
+        test_score = round((correct / len(attempts)) * 100) if attempts else None
+
+        # Ответы на кейсы по этому курсу
+        cases_res = await db.execute(
+            select(CaseAnswer, CourseModule.title)
+            .join(CourseModule, CaseAnswer.module_id == CourseModule.id)
+            .where(
+                CaseAnswer.user_id == user_id,
+                CourseModule.course_id == enr.course_id,
+            )
+        )
+        cases = cases_res.all()
+        case_results = []
+        for case_ans, mod_title in cases:
+            case_results.append({
+                "module_title": mod_title,
+                "answer": case_ans.answer,
+                "score": case_ans.score,
+                "created_at": case_ans.created_at.isoformat() if case_ans.created_at else None,
+            })
+
+        # Итоговый балл
+        scores = [test_score] if test_score is not None else []
+        for c in case_results:
+            if c["score"] is not None:
+                scores.append(c["score"])
+        final_score = round(sum(scores) / len(scores)) if scores else None
+
+        courses_data.append({
+            "course_id": enr.course_id,
+            "course_title": course_title,
+            "status": enr.status,
+            "progress_pct": enr.progress_pct,
+            "enrolled_at": enr.enrolled_at.isoformat() if enr.enrolled_at else None,
+            "test_score": test_score,
+            "test_results": test_results,
+            "case_results": case_results,
+            "final_score": final_score,
+        })
+
+    # Общий средний балл
+    all_scores = [c["final_score"] for c in courses_data if c["final_score"] is not None]
+    overall_score = round(sum(all_scores) / len(all_scores)) if all_scores else None
+
+    return {
+        "user": {
+            "id": user.id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "role": user.role,
+        },
+        "overall_score": overall_score,
+        "courses": courses_data,
+    }
