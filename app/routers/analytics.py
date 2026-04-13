@@ -18,11 +18,13 @@ async def dashboard(
     enrolled_result = await db.execute(select(func.count(Enrollment.id)))
     total_enrolled = enrolled_result.scalar() or 0
 
-    score_result = await db.execute(
-        select(func.avg(TestAttempt.score)).where(TestAttempt.score > 0)
+    total_res = await db.execute(select(func.count(TestAttempt.id)))
+    correct_res = await db.execute(
+        select(func.count(TestAttempt.id)).where(TestAttempt.is_correct == True)
     )
-    avg_raw = score_result.scalar() or 0
-    avg_score = round(float(avg_raw), 1)
+    total_att = total_res.scalar() or 0
+    correct_att = correct_res.scalar() or 0
+    avg_score = round((correct_att / total_att) * 100, 1) if total_att > 0 else 0.0
 
     courses_result = await db.execute(
         select(func.count(Course.id)).where(Course.status == "published")
@@ -42,16 +44,25 @@ async def dashboard(
         )
         all_courses = courses_res.all()
         for course_title, course_id in all_courses:
-            score_res = await db.execute(
-                select(func.avg(TestAttempt.score))
+            # Считаем процент правильных ответов
+            total_res = await db.execute(
+                select(func.count(TestAttempt.id))
                 .join(TestQuestion, TestAttempt.test_id == TestQuestion.id)
                 .join(CourseModule, TestQuestion.module_id == CourseModule.id)
-                .where(CourseModule.course_id == course_id, TestAttempt.score >= 0)
+                .where(CourseModule.course_id == course_id)
             )
-            avg = score_res.scalar()
+            correct_res = await db.execute(
+                select(func.count(TestAttempt.id))
+                .join(TestQuestion, TestAttempt.test_id == TestQuestion.id)
+                .join(CourseModule, TestQuestion.module_id == CourseModule.id)
+                .where(CourseModule.course_id == course_id, TestAttempt.is_correct == True)
+            )
+            total = total_res.scalar() or 0
+            correct = correct_res.scalar() or 0
+            pct = round((correct / total) * 100, 1) if total > 0 else 0.0
             weak_topics.append({
                 "topic": course_title,
-                "score": round(float(avg), 1) if avg is not None else 0.0
+                "score": pct
             })
         weak_topics.sort(key=lambda x: x["score"])
     except Exception:
