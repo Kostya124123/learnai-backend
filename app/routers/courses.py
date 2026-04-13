@@ -267,6 +267,12 @@ async def delete_document(
             WHERE c.document_id = :doc_id)
     """), {"doc_id": doc_id})
     await db.execute(text("""
+        DELETE FROM case_answers WHERE module_id IN (
+            SELECT cm.id FROM course_modules cm
+            JOIN courses c ON cm.course_id = c.id
+            WHERE c.document_id = :doc_id)
+    """), {"doc_id": doc_id})
+    await db.execute(text("""
         DELETE FROM tests
         WHERE module_id IN (
             SELECT cm.id FROM course_modules cm
@@ -296,6 +302,7 @@ async def delete_course(
 ):
     from sqlalchemy import text
     await db.execute(text("DELETE FROM test_attempts WHERE test_id IN (SELECT id FROM tests WHERE module_id IN (SELECT id FROM course_modules WHERE course_id = :cid))"), {"cid": course_id})
+    await db.execute(text("DELETE FROM case_answers WHERE module_id IN (SELECT id FROM course_modules WHERE course_id = :cid)"), {"cid": course_id})
     await db.execute(text("DELETE FROM tests WHERE module_id IN (SELECT id FROM course_modules WHERE course_id = :cid)"), {"cid": course_id})
     await db.execute(text("DELETE FROM enrollments WHERE course_id = :cid"), {"cid": course_id})
     await db.execute(text("DELETE FROM course_modules WHERE course_id = :cid"), {"cid": course_id})
