@@ -164,14 +164,16 @@ async def answer_question(question: str, context: str = "") -> dict:
         user_message = (
             f"КОНТЕКСТ ИЗ ДОКУМЕНТОВ:\n{context}\n\n"
             f"ВОПРОС: {question}\n\n"
-            "Ответь на вопрос строго на основе контекста выше."
+            "ИНСТРУКЦИЯ: Ответь на вопрос строго на основе контекста выше. "
+            "Отвечай ТОЛЬКО на русском языке."
         )
         source = "корпоративные документы"
     else:
         user_message = (
             f"ВОПРОС: {question}\n\n"
-            "Документы не загружены. Сообщи пользователю, что для получения ответов "
-            "необходимо сначала загрузить корпоративные документы через HR-панель."
+            "ИНСТРУКЦИЯ: Документы не загружены. Сообщи пользователю на русском языке, что для получения ответов "
+            "необходимо сначала загрузить корпоративные документы через HR-панель. "
+            "Отвечай ТОЛЬКО на русском языке."
         )
         source = "нет загруженных документов"
 
@@ -179,6 +181,7 @@ async def answer_question(question: str, context: str = "") -> dict:
         answer = await _chat([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
+            {"role": "assistant", "content": "Отвечаю на русском языке:\n\n"},
         ], temperature=0.2, max_tokens=1024)
 
         return {"answer": answer, "source": source}
