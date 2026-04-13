@@ -5,7 +5,7 @@ from sqlalchemy import select, func
 from app.core.database import get_db
 from app.core.security import get_current_user, require_hr
 from app.models.user import User
-from app.models.course import Course, CourseModule, TestQuestion, Enrollment
+from app.models.course import Course, CourseModule, TestQuestion, Enrollment, CaseAnswer
 from app.models.document import Document
 from app.schemas.course import (
     CourseOut, CourseModuleOut, TestQuestionOut,
@@ -335,3 +335,68 @@ async def enroll_user(
     db.add(enrollment)
     await db.commit()
     return {"status": "enrolled"}
+
+
+# ── Case Answers ───────────────────────────────────────────────
+
+@router.post("/case-answers")
+async def submit_case_answer(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.models.course import CaseAnswer
+    answer = CaseAnswer(
+        user_id=current_user.id,
+        module_id=body["module_id"],
+        answer=body["answer"],
+    )
+    db.add(answer)
+    await db.commit()
+    await db.refresh(answer)
+    return {"status": "submitted", "id": answer.id}
+
+
+@router.get("/case-answers")
+async def list_case_answers(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_hr),
+):
+    from app.models.course import CaseAnswer
+    from app.models.user import User as UserModel
+    result = await db.execute(
+        select(CaseAnswer).order_by(CaseAnswer.created_at.desc())
+    )
+    answers = result.scalars().all()
+    out = []
+    for a in answers:
+        user_res = await db.execute(select(UserModel).where(UserModel.id == a.user_id))
+        user = user_res.scalar_one_or_none()
+        mod_res = await db.execute(select(CourseModule).where(CourseModule.id == a.module_id))
+        mod = mod_res.scalar_one_or_none()
+        out.append({
+            "id": a.id,
+            "user_name": user.full_name if user else "—",
+            "module_title": mod.title if mod else "—",
+            "answer": a.answer,
+            "score": a.score,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        })
+    return out
+
+
+@router.patch("/case-answers/{answer_id}/score")
+async def score_case_answer(
+    answer_id: int,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_hr),
+):
+    from app.models.course import CaseAnswer
+    result = await db.execute(select(CaseAnswer).where(CaseAnswer.id == answer_id))
+    answer = result.scalar_one_or_none()
+    if not answer:
+        raise HTTPException(404, "Answer not found")
+    answer.score = body.get("score")
+    await db.commit()
+    return {"status": "scored"}
