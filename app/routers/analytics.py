@@ -115,8 +115,17 @@ async def employee_card(
                 TestAttempt.user_id == user_id,
                 CourseModule.course_id == enr.course_id,
             )
+            .order_by(TestAttempt.attempted_at.asc())
         )
-        attempts = attempts_res.all()
+        all_attempts = attempts_res.all()
+
+        # Дедупликация — берём только первую попытку по каждому вопросу
+        seen = set()
+        attempts = []
+        for attempt, question, correct_answer in all_attempts:
+            if attempt.test_id not in seen:
+                seen.add(attempt.test_id)
+                attempts.append((attempt, question, correct_answer))
 
         test_results = []
         correct = 0

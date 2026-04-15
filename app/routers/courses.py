@@ -166,6 +166,19 @@ async def get_modules(
     return result.scalars().all()
 
 
+@router.get("/modules/{module_id}")
+async def get_module(
+    module_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(select(CourseModule).where(CourseModule.id == module_id))
+    mod = result.scalar_one_or_none()
+    if not mod:
+        raise HTTPException(404, "Module not found")
+    return {"id": mod.id, "course_id": mod.course_id, "module_type": mod.module_type, "title": mod.title}
+
+
 @router.get("/modules/{module_id}/tests", response_model=list[TestQuestionOut])
 async def get_tests(
     module_id: int,
@@ -200,6 +213,16 @@ async def my_enrollments(
         )
         for e, title in rows
     ]
+
+
+@router.get("/enrollments/all")
+async def all_enrollments(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_hr),
+):
+    result = await db.execute(select(Enrollment))
+    enrollments = result.scalars().all()
+    return [{"id": e.id, "course_id": e.course_id, "user_id": e.user_id, "status": e.status} for e in enrollments]
 
 
 @router.post("/enrollments/{course_id}")
